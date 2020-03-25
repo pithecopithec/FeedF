@@ -2,12 +2,27 @@
 
 
 [[projects]]
-  digest = "1:98b5bf49a3b26f2f7fb755b41c2bd1789c4f1fa92038fb40e6e2f91b1b4698b5"
+  digest = "1:15d6d42780e75fabe71a113c30e054fe97c6b8355a679a48c3018cc608f1b5d4"
   name = "github.com/360EntSecGroup-Skylar/excelize"
   packages = ["."]
   pruneopts = "UT"
-  revision = "a00ba75f0f294ce04bfe8d25703d13cd27d6284f"
-  version = "v2.0.2"
+  revision = "e51aff2d9562bbfb290ef76a948facb6d4660eff"
+  version = "v2.1.0"
+
+[[projects]]
+  digest = "1:009e32bac92d22e3dd8f532ae0802a9cf72c39a2d28f21c33c6f3cfaf3e4fb78"
+  name = "github.com/akavel/rsrc"
+  packages = [
+    ".",
+    "binutil",
+    "coff",
+    "ico",
+    "internal",
+    "rsrc",
+  ]
+  pruneopts = "UT"
+  revision = "b9f6b78f792dc3dddaf295854d968f5b6fdcdba1"
+  version = "v0.8.0"
 
 [[projects]]
   branch = "master"
@@ -17,9 +32,54 @@
   pruneopts = "UT"
   revision = "c48cc78d482608239f6c4c92a4abd87eb8761c90"
 
+[[projects]]
+  branch = "master"
+  digest = "1:8c294aabd4396170f5bcbb763d558e4c8d21ded4b2a1618dfb664e58a4fffeef"
+  name = "golang.org/x/net"
+  packages = [
+    "html",
+    "html/atom",
+    "html/charset",
+  ]
+  pruneopts = "UT"
+  revision = "d3edc9973b7eb1fb302b0ff2c62357091cea9a30"
+
+[[projects]]
+  digest = "1:8a0baffd5559acaa560f854d7d525c02f4fec2d4f8a214398556fb661a10f6e0"
+  name = "golang.org/x/text"
+  packages = [
+    "encoding",
+    "encoding/charmap",
+    "encoding/htmlindex",
+    "encoding/internal",
+    "encoding/internal/identifier",
+    "encoding/japanese",
+    "encoding/korean",
+    "encoding/simplifiedchinese",
+    "encoding/traditionalchinese",
+    "encoding/unicode",
+    "internal/gen",
+    "internal/language",
+    "internal/language/compact",
+    "internal/tag",
+    "internal/utf8internal",
+    "language",
+    "runes",
+    "transform",
+    "unicode/cldr",
+  ]
+  pruneopts = "UT"
+  revision = "342b2e1fbaa52c93f31447ad2c6abc048c63e475"
+  version = "v0.3.2"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  input-imports = ["github.com/360EntSecGroup-Skylar/excelize"]
+  input-imports = [
+    "github.com/360EntSecGroup-Skylar/excelize",
+    "github.com/akavel/rsrc",
+    "github.com/akavel/rsrc/rsrc",
+    "golang.org/x/text/encoding/charmap",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

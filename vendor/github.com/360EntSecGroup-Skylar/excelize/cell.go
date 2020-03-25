@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -44,7 +44,8 @@ func (f *File) GetCellValue(sheet, axis string) (string, error) {
 	})
 }
 
-// SetCellValue provides a function to set value of a cell. The following
+// SetCellValue provides a function to set value of a cell. The specified
+// coordinates should not be in the first row of the table. The following
 // shows the supported data types:
 //
 //    int
@@ -82,7 +83,8 @@ func (f *File) SetCellValue(sheet, axis string, value interface{}) error {
 	case []byte:
 		err = f.SetCellStr(sheet, axis, string(v))
 	case time.Duration:
-		err = f.SetCellDefault(sheet, axis, strconv.FormatFloat(v.Seconds()/86400.0, 'f', -1, 32))
+		_, d := setCellDuration(v)
+		err = f.SetCellDefault(sheet, axis, d)
 		if err != nil {
 			return err
 		}
@@ -130,26 +132,48 @@ func (f *File) setCellIntFunc(sheet, axis string, value interface{}) error {
 // setCellTimeFunc provides a method to process time type of value for
 // SetCellValue.
 func (f *File) setCellTimeFunc(sheet, axis string, value time.Time) error {
-	excelTime, err := timeToExcelTime(value)
+	xlsx, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
-	if excelTime > 0 {
-		err = f.SetCellDefault(sheet, axis, strconv.FormatFloat(excelTime, 'f', -1, 64))
-		if err != nil {
-			return err
-		}
+	cellData, col, _, err := f.prepareCell(xlsx, sheet, axis)
+	if err != nil {
+		return err
+	}
+	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
+
+	var isNum bool
+	cellData.T, cellData.V, isNum, err = setCellTime(value)
+	if err != nil {
+		return err
+	}
+	if isNum {
 		err = f.setDefaultTimeStyle(sheet, axis, 22)
-		if err != nil {
-			return err
-		}
-	} else {
-		err = f.SetCellStr(sheet, axis, value.Format(time.RFC3339Nano))
 		if err != nil {
 			return err
 		}
 	}
 	return err
+}
+
+func setCellTime(value time.Time) (t string, b string, isNum bool, err error) {
+	var excelTime float64
+	excelTime, err = timeToExcelTime(value)
+	if err != nil {
+		return
+	}
+	isNum = excelTime > 0
+	if isNum {
+		t, b = setCellDefault(strconv.FormatFloat(excelTime, 'f', -1, 64))
+	} else {
+		t, b = setCellDefault(value.Format(time.RFC3339Nano))
+	}
+	return
+}
+
+func setCellDuration(value time.Duration) (t string, v string) {
+	v = strconv.FormatFloat(value.Seconds()/86400.0, 'f', -1, 32)
+	return
 }
 
 // SetCellInt provides a function to set int type value of a cell by given
@@ -164,9 +188,13 @@ func (f *File) SetCellInt(sheet, axis string, value int) error {
 		return err
 	}
 	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
-	cellData.T = ""
-	cellData.V = strconv.Itoa(value)
+	cellData.T, cellData.V = setCellInt(value)
 	return err
+}
+
+func setCellInt(value int) (t string, v string) {
+	v = strconv.Itoa(value)
+	return
 }
 
 // SetCellBool provides a function to set bool type value of a cell by given
@@ -181,13 +209,18 @@ func (f *File) SetCellBool(sheet, axis string, value bool) error {
 		return err
 	}
 	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
-	cellData.T = "b"
-	if value {
-		cellData.V = "1"
-	} else {
-		cellData.V = "0"
-	}
+	cellData.T, cellData.V = setCellBool(value)
 	return err
+}
+
+func setCellBool(value bool) (t string, v string) {
+	t = "b"
+	if value {
+		v = "1"
+	} else {
+		v = "0"
+	}
+	return
 }
 
 // SetCellFloat sets a floating point value into a cell. The prec parameter
@@ -209,9 +242,13 @@ func (f *File) SetCellFloat(sheet, axis string, value float64, prec, bitSize int
 		return err
 	}
 	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
-	cellData.T = ""
-	cellData.V = strconv.FormatFloat(value, 'f', prec, bitSize)
+	cellData.T, cellData.V = setCellFloat(value, prec, bitSize)
 	return err
+}
+
+func setCellFloat(value float64, prec, bitSize int) (t string, v string) {
+	v = strconv.FormatFloat(value, 'f', prec, bitSize)
+	return
 }
 
 // SetCellStr provides a function to set string type value of a cell. Total
@@ -225,21 +262,25 @@ func (f *File) SetCellStr(sheet, axis, value string) error {
 	if err != nil {
 		return err
 	}
+	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
+	cellData.T, cellData.V, cellData.XMLSpace = setCellStr(value)
+	return err
+}
+
+func setCellStr(value string) (t string, v string, ns xml.Attr) {
 	if len(value) > 32767 {
 		value = value[0:32767]
 	}
-	// Leading space(s) character detection.
-	if len(value) > 0 && value[0] == 32 {
-		cellData.XMLSpace = xml.Attr{
+	// Leading and ending space(s) character detection.
+	if len(value) > 0 && (value[0] == 32 || value[len(value)-1] == 32) {
+		ns = xml.Attr{
 			Name:  xml.Name{Space: NameSpaceXML, Local: "space"},
 			Value: "preserve",
 		}
 	}
-
-	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
-	cellData.T = "str"
-	cellData.V = value
-	return err
+	t = "str"
+	v = value
+	return
 }
 
 // SetCellDefault provides a function to set string type value of a cell as
@@ -254,9 +295,13 @@ func (f *File) SetCellDefault(sheet, axis, value string) error {
 		return err
 	}
 	cellData.S = f.prepareCellStyle(xlsx, col, cellData.S)
-	cellData.T = ""
-	cellData.V = value
+	cellData.T, cellData.V = setCellDefault(value)
 	return err
+}
+
+func setCellDefault(value string) (t string, v string) {
+	v = value
+	return
 }
 
 // GetCellFormula provides a function to get formula from cell by given
@@ -395,7 +440,7 @@ func (f *File) SetCellHyperLink(sheet, axis, link, linkType string) error {
 		linkData = xlsxHyperlink{
 			Ref: axis,
 		}
-		sheetPath, _ := f.sheetMap[trimSheetName(sheet)]
+		sheetPath := f.sheetMap[trimSheetName(sheet)]
 		sheetRels := "xl/worksheets/_rels/" + strings.TrimPrefix(sheetPath, "xl/worksheets/") + ".rels"
 		rID := f.addRels(sheetRels, SourceRelationshipHyperLink, link, linkType)
 		linkData.RID = "rId" + strconv.Itoa(rID)
@@ -410,63 +455,6 @@ func (f *File) SetCellHyperLink(sheet, axis, link, linkType string) error {
 
 	xlsx.Hyperlinks.Hyperlink = append(xlsx.Hyperlinks.Hyperlink, linkData)
 	return nil
-}
-
-// MergeCell provides a function to merge cells by given coordinate area and
-// sheet name. For example create a merged cell of D3:E9 on Sheet1:
-//
-//    err := f.MergeCell("Sheet1", "D3", "E9")
-//
-// If you create a merged cell that overlaps with another existing merged cell,
-// those merged cells that already exist will be removed.
-func (f *File) MergeCell(sheet, hcell, vcell string) error {
-	coordinates, err := f.areaRefToCoordinates(hcell + ":" + vcell)
-	if err != nil {
-		return err
-	}
-	x1, y1, x2, y2 := coordinates[0], coordinates[1], coordinates[2], coordinates[3]
-
-	if x1 == x2 && y1 == y2 {
-		return err
-	}
-
-	// Correct the coordinate area, such correct C1:B3 to B1:C3.
-	if x2 < x1 {
-		x1, x2 = x2, x1
-	}
-
-	if y2 < y1 {
-		y1, y2 = y2, y1
-	}
-
-	hcell, _ = CoordinatesToCellName(x1, y1)
-	vcell, _ = CoordinatesToCellName(x2, y2)
-
-	xlsx, err := f.workSheetReader(sheet)
-	if err != nil {
-		return err
-	}
-	if xlsx.MergeCells != nil {
-		ref := hcell + ":" + vcell
-		// Delete the merged cells of the overlapping area.
-		for _, cellData := range xlsx.MergeCells.Cells {
-			cc := strings.Split(cellData.Ref, ":")
-			if len(cc) != 2 {
-				return fmt.Errorf("invalid area %q", cellData.Ref)
-			}
-			c1, _ := checkCellInArea(hcell, cellData.Ref)
-			c2, _ := checkCellInArea(vcell, cellData.Ref)
-			c3, _ := checkCellInArea(cc[0], ref)
-			c4, _ := checkCellInArea(cc[1], ref)
-			if !(!c1 && !c2 && !c3 && !c4) {
-				return nil
-			}
-		}
-		xlsx.MergeCells.Cells = append(xlsx.MergeCells.Cells, &xlsxMergeCell{Ref: ref})
-	} else {
-		xlsx.MergeCells = &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: hcell + ":" + vcell}}}
-	}
-	return err
 }
 
 // SetSheetRow writes an array to row by given worksheet name, starting
@@ -601,7 +589,7 @@ func (f *File) mergeCellsParser(xlsx *xlsxWorksheet, axis string) (string, error
 	axis = strings.ToUpper(axis)
 	if xlsx.MergeCells != nil {
 		for i := 0; i < len(xlsx.MergeCells.Cells); i++ {
-			ok, err := checkCellInArea(axis, xlsx.MergeCells.Cells[i].Ref)
+			ok, err := f.checkCellInArea(axis, xlsx.MergeCells.Cells[i].Ref)
 			if err != nil {
 				return axis, err
 			}
@@ -615,7 +603,7 @@ func (f *File) mergeCellsParser(xlsx *xlsxWorksheet, axis string) (string, error
 
 // checkCellInArea provides a function to determine if a given coordinate is
 // within an area.
-func checkCellInArea(cell, area string) (bool, error) {
+func (f *File) checkCellInArea(cell, area string) (bool, error) {
 	col, row, err := CellNameToCoordinates(cell)
 	if err != nil {
 		return false, err
@@ -625,11 +613,30 @@ func checkCellInArea(cell, area string) (bool, error) {
 	if len(rng) != 2 {
 		return false, err
 	}
+	coordinates, err := f.areaRefToCoordinates(area)
+	if err != nil {
+		return false, err
+	}
 
-	firstCol, firstRow, _ := CellNameToCoordinates(rng[0])
-	lastCol, lastRow, _ := CellNameToCoordinates(rng[1])
+	return cellInRef([]int{col, row}, coordinates), err
+}
 
-	return col >= firstCol && col <= lastCol && row >= firstRow && row <= lastRow, err
+// cellInRef provides a function to determine if a given range is within an
+// range.
+func cellInRef(cell, ref []int) bool {
+	return cell[0] >= ref[0] && cell[0] <= ref[2] && cell[1] >= ref[1] && cell[1] <= ref[3]
+}
+
+// isOverlap find if the given two rectangles overlap or not.
+func isOverlap(rect1, rect2 []int) bool {
+	return cellInRef([]int{rect1[0], rect1[1]}, rect2) ||
+		cellInRef([]int{rect1[2], rect1[1]}, rect2) ||
+		cellInRef([]int{rect1[0], rect1[3]}, rect2) ||
+		cellInRef([]int{rect1[2], rect1[3]}, rect2) ||
+		cellInRef([]int{rect2[0], rect2[1]}, rect1) ||
+		cellInRef([]int{rect2[2], rect2[1]}, rect1) ||
+		cellInRef([]int{rect2[0], rect2[3]}, rect1) ||
+		cellInRef([]int{rect2[2], rect2[3]}, rect1)
 }
 
 // getSharedForumula find a cell contains the same formula as another cell,

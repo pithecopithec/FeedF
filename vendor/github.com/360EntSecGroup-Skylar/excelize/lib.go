@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -22,14 +22,12 @@ import (
 // ReadZipReader can be used to read an XLSX in memory without touching the
 // filesystem.
 func ReadZipReader(r *zip.Reader) (map[string][]byte, int, error) {
-	fileList := make(map[string][]byte)
+	fileList := make(map[string][]byte, len(r.File))
 	worksheets := 0
 	for _, v := range r.File {
 		fileList[v.Name] = readFile(v)
-		if len(v.Name) > 18 {
-			if v.Name[0:19] == "xl/worksheets/sheet" {
-				worksheets++
-			}
+		if strings.HasPrefix(v.Name, "xl/worksheets/sheet") {
+			worksheets++
 		}
 	}
 	return fileList, worksheets, nil
@@ -58,7 +56,8 @@ func readFile(file *zip.File) []byte {
 	if err != nil {
 		log.Fatal(err)
 	}
-	buff := bytes.NewBuffer(nil)
+	dat := make([]byte, 0, file.FileInfo().Size())
+	buff := bytes.NewBuffer(dat)
 	_, _ = io.Copy(buff, rc)
 	rc.Close()
 	return buff.Bytes()
@@ -198,6 +197,15 @@ func CoordinatesToCellName(col, row int) (string, error) {
 
 // boolPtr returns a pointer to a bool with the given value.
 func boolPtr(b bool) *bool { return &b }
+
+// intPtr returns a pointer to a int with the given value.
+func intPtr(i int) *int { return &i }
+
+// float64Ptr returns a pofloat64er to a float64 with the given value.
+func float64Ptr(f float64) *float64 { return &f }
+
+// stringPtr returns a pointer to a string with the given value.
+func stringPtr(s string) *string { return &s }
 
 // defaultTrue returns true if b is nil, or the pointed value.
 func defaultTrue(b *bool) bool {

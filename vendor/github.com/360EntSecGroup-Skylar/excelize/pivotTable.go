@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -56,19 +56,17 @@ type PivotTableOption struct {
 //            f.SetCellValue("Sheet1", fmt.Sprintf("D%d", i+2), rand.Intn(5000))
 //            f.SetCellValue("Sheet1", fmt.Sprintf("E%d", i+2), region[rand.Intn(4)])
 //        }
-//        err := f.AddPivotTable(&excelize.PivotTableOption{
+//        if err := f.AddPivotTable(&excelize.PivotTableOption{
 //            DataRange:       "Sheet1!$A$1:$E$31",
 //            PivotTableRange: "Sheet1!$G$2:$M$34",
 //            Rows:            []string{"Month", "Year"},
 //            Columns:         []string{"Type"},
 //            Data:            []string{"Sales"},
-//        })
-//        if err != nil {
-//            fmt.Println(err)
+//        }); err != nil {
+//            println(err.Error())
 //        }
-//        err = f.SaveAs("Book1.xlsx")
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.SaveAs("Book1.xlsx"); err != nil {
+//            println(err.Error())
 //        }
 //    }
 //
@@ -253,7 +251,10 @@ func (f *File) addPivotTable(cacheID, pivotTableID int, pivotTableXML string, op
 				},
 			},
 		},
-		ColFields:  &xlsxColFields{},
+		ColItems: &xlsxColItems{
+			Count: 1,
+			I:     []*xlsxI{{}},
+		},
 		DataFields: &xlsxDataFields{},
 		PivotTableStyleInfo: &xlsxPivotTableStyleInfo{
 			Name:           "PivotStyleLight16",
@@ -286,19 +287,10 @@ func (f *File) addPivotTable(cacheID, pivotTableID int, pivotTableXML string, op
 	// count row fields
 	pt.RowFields.Count = len(pt.RowFields.Field)
 
-	// col fields
-	colFieldsIndex, err := f.getPivotFieldsIndex(opt.Columns, opt)
+	err = f.addPivotColFields(&pt, opt)
 	if err != nil {
 		return err
 	}
-	for _, filedIdx := range colFieldsIndex {
-		pt.ColFields.Field = append(pt.ColFields.Field, &xlsxField{
-			X: filedIdx,
-		})
-	}
-
-	// count col fields
-	pt.ColFields.Count = len(pt.ColFields.Field)
 
 	// data fields
 	dataFieldsIndex, err := f.getPivotFieldsIndex(opt.Data, opt)
@@ -328,6 +320,31 @@ func inStrSlice(a []string, x string) int {
 		}
 	}
 	return -1
+}
+
+// addPivotColFields create pivot column fields by given pivot table
+// definition and option.
+func (f *File) addPivotColFields(pt *xlsxPivotTableDefinition, opt *PivotTableOption) error {
+	if len(opt.Columns) == 0 {
+		return nil
+	}
+
+	pt.ColFields = &xlsxColFields{}
+
+	// col fields
+	colFieldsIndex, err := f.getPivotFieldsIndex(opt.Columns, opt)
+	if err != nil {
+		return err
+	}
+	for _, filedIdx := range colFieldsIndex {
+		pt.ColFields.Field = append(pt.ColFields.Field, &xlsxField{
+			X: filedIdx,
+		})
+	}
+
+	// count col fields
+	pt.ColFields.Count = len(pt.ColFields.Field)
+	return err
 }
 
 // addPivotFields create pivot fields based on the column order of the first

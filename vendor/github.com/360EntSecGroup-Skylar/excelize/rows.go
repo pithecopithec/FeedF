@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -10,9 +10,12 @@
 package excelize
 
 import (
+	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"math"
 	"strconv"
 )
@@ -20,12 +23,20 @@ import (
 // GetRows return all the rows in a sheet by given worksheet name (case
 // sensitive). For example:
 //
-//    rows, err := f.GetRows("Sheet1")
-//    for _, row := range rows {
-//        for _, colCell := range row {
-//            fmt.Print(colCell, "\t")
+//    rows, err := f.Rows("Sheet1")
+//    if err != nil {
+//        println(err.Error())
+//        return
+//    }
+//    for rows.Next() {
+//        row, err := rows.Columns()
+//        if err != nil {
+//            println(err.Error())
 //        }
-//        fmt.Println()
+//        for _, colCell := range row {
+//            print(colCell, "\t")
+//        }
+//        println()
 //    }
 //
 func (f *File) GetRows(sheet string) ([][]string, error) {
@@ -49,15 +60,18 @@ func (f *File) GetRows(sheet string) ([][]string, error) {
 
 // Rows defines an iterator to a sheet
 type Rows struct {
-	err    error
-	f      *File
-	rows   []xlsxRow
-	curRow int
+	err                        error
+	curRow, totalRow, stashRow int
+	sheet                      string
+	rows                       []xlsxRow
+	f                          *File
+	decoder                    *xml.Decoder
 }
 
 // Next will return true if find the next row element.
 func (rows *Rows) Next() bool {
-	return rows.curRow < len(rows.rows)
+	rows.curRow++
+	return rows.curRow <= rows.totalRow
 }
 
 // Error will return the error when the find next row element
@@ -67,20 +81,62 @@ func (rows *Rows) Error() error {
 
 // Columns return the current row's column values
 func (rows *Rows) Columns() ([]string, error) {
-	curRow := rows.rows[rows.curRow]
-	rows.curRow++
+	var (
+		err          error
+		inElement    string
+		row, cellCol int
+		columns      []string
+	)
 
-	columns := make([]string, len(curRow.C))
-	d := rows.f.sharedStringsReader()
-	for _, colCell := range curRow.C {
-		col, _, err := CellNameToCoordinates(colCell.R)
-		if err != nil {
-			return columns, err
-		}
-		val, _ := colCell.getValueFrom(rows.f, d)
-		columns[col-1] = val
+	if rows.stashRow >= rows.curRow {
+		return columns, err
 	}
-	return columns, nil
+
+	d := rows.f.sharedStringsReader()
+	for {
+		token, _ := rows.decoder.Token()
+		if token == nil {
+			break
+		}
+		switch startElement := token.(type) {
+		case xml.StartElement:
+			inElement = startElement.Name.Local
+			if inElement == "row" {
+				for _, attr := range startElement.Attr {
+					if attr.Name.Local == "r" {
+						row, err = strconv.Atoi(attr.Value)
+						if err != nil {
+							return columns, err
+						}
+						if row > rows.curRow {
+							rows.stashRow = row - 1
+							return columns, err
+						}
+					}
+				}
+			}
+			if inElement == "c" {
+				colCell := xlsxC{}
+				_ = rows.decoder.DecodeElement(&colCell, &startElement)
+				cellCol, _, err = CellNameToCoordinates(colCell.R)
+				if err != nil {
+					return columns, err
+				}
+				blank := cellCol - len(columns)
+				for i := 1; i < blank; i++ {
+					columns = append(columns, "")
+				}
+				val, _ := colCell.getValueFrom(rows.f, d)
+				columns = append(columns, val)
+			}
+		case xml.EndElement:
+			inElement = startElement.Name.Local
+			if inElement == "row" {
+				return columns, err
+			}
+		}
+	}
+	return columns, err
 }
 
 // ErrSheetNotExist defines an error of sheet is not exist
@@ -89,37 +145,70 @@ type ErrSheetNotExist struct {
 }
 
 func (err ErrSheetNotExist) Error() string {
-	return fmt.Sprintf("Sheet %s is not exist", string(err.SheetName))
+	return fmt.Sprintf("sheet %s is not exist", string(err.SheetName))
 }
 
 // Rows return a rows iterator. For example:
 //
 //    rows, err := f.Rows("Sheet1")
+//    if err != nil {
+//        println(err.Error())
+//        return
+//    }
 //    for rows.Next() {
 //        row, err := rows.Columns()
-//        for _, colCell := range row {
-//            fmt.Print(colCell, "\t")
+//        if err != nil {
+//            println(err.Error())
 //        }
-//        fmt.Println()
+//        for _, colCell := range row {
+//            print(colCell, "\t")
+//        }
+//        println()
 //    }
 //
 func (f *File) Rows(sheet string) (*Rows, error) {
-	xlsx, err := f.workSheetReader(sheet)
-	if err != nil {
-		return nil, err
-	}
 	name, ok := f.sheetMap[trimSheetName(sheet)]
 	if !ok {
 		return nil, ErrSheetNotExist{sheet}
 	}
-	if xlsx != nil {
-		data := f.readXML(name)
-		f.saveFileList(name, replaceWorkSheetsRelationshipsNameSpaceBytes(namespaceStrictToTransitional(data)))
+	if f.Sheet[name] != nil {
+		// flush data
+		output, _ := xml.Marshal(f.Sheet[name])
+		f.saveFileList(name, replaceWorkSheetsRelationshipsNameSpaceBytes(output))
 	}
-	return &Rows{
-		f:    f,
-		rows: xlsx.SheetData.Row,
-	}, nil
+	var (
+		err       error
+		inElement string
+		row       int
+		rows      Rows
+	)
+	decoder := f.xmlNewDecoder(bytes.NewReader(f.readXML(name)))
+	for {
+		token, _ := decoder.Token()
+		if token == nil {
+			break
+		}
+		switch startElement := token.(type) {
+		case xml.StartElement:
+			inElement = startElement.Name.Local
+			if inElement == "row" {
+				for _, attr := range startElement.Attr {
+					if attr.Name.Local == "r" {
+						row, err = strconv.Atoi(attr.Value)
+						if err != nil {
+							return &rows, err
+						}
+					}
+				}
+				rows.totalRow = row
+			}
+		default:
+		}
+	}
+	rows.f = f
+	rows.sheet = name
+	rows.decoder = f.xmlNewDecoder(bytes.NewReader(f.readXML(name)))
+	return &rows, nil
 }
 
 // SetRowHeight provides a function to set the height of a single row. For
@@ -187,15 +276,21 @@ func (f *File) GetRowHeight(sheet string, row int) (float64, error) {
 // sharedStringsReader provides a function to get the pointer to the structure
 // after deserialization of xl/sharedStrings.xml.
 func (f *File) sharedStringsReader() *xlsxSST {
+	var err error
+
 	if f.SharedStrings == nil {
 		var sharedStrings xlsxSST
 		ss := f.readXML("xl/sharedStrings.xml")
 		if len(ss) == 0 {
 			ss = f.readXML("xl/SharedStrings.xml")
 		}
-		_ = xml.Unmarshal(namespaceStrictToTransitional(ss), &sharedStrings)
+		if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(ss))).
+			Decode(&sharedStrings); err != nil && err != io.EOF {
+			log.Printf("xml decode error: %s", err)
+		}
 		f.SharedStrings = &sharedStrings
 	}
+
 	return f.SharedStrings
 }
 
@@ -207,11 +302,17 @@ func (xlsx *xlsxC) getValueFrom(f *File, d *xlsxSST) (string, error) {
 	case "s":
 		xlsxSI := 0
 		xlsxSI, _ = strconv.Atoi(xlsx.V)
-		return f.formattedValue(xlsx.S, d.SI[xlsxSI].String()), nil
+		if len(d.SI) > xlsxSI {
+			return f.formattedValue(xlsx.S, d.SI[xlsxSI].String()), nil
+		}
+		return f.formattedValue(xlsx.S, xlsx.V), nil
 	case "str":
 		return f.formattedValue(xlsx.S, xlsx.V), nil
 	case "inlineStr":
-		return f.formattedValue(xlsx.S, xlsx.IS.String()), nil
+		if xlsx.IS != nil {
+			return f.formattedValue(xlsx.S, xlsx.IS.String()), nil
+		}
+		return f.formattedValue(xlsx.S, xlsx.V), nil
 	default:
 		return f.formattedValue(xlsx.S, xlsx.V), nil
 	}

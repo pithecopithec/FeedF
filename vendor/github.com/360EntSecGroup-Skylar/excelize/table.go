@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -39,8 +39,10 @@ func parseFormatTableSet(formatSet string) (*formatTable, error) {
 //
 //    err := f.AddTable("Sheet2", "F2", "H6", `{"table_name":"table","table_style":"TableStyleMedium2", "show_first_column":true,"show_last_column":true,"show_row_stripes":false,"show_column_stripes":true}`)
 //
-// Note that the table at least two lines include string type header. Multiple
-// tables coordinate areas can't have an intersection.
+// Note that the table must be at least two lines including the header. The
+// header cells must contain strings and must be unique, and must set the
+// header row data of the table before calling the AddTable function. Multiple
+// tables coordinate areas that can't have an intersection.
 //
 // table_name: The name of the table, in the same worksheet name of the table should be unique
 //
@@ -77,8 +79,7 @@ func (f *File) AddTable(sheet, hcell, vcell, format string) error {
 	sheetRelationshipsTableXML := "../tables/table" + strconv.Itoa(tableID) + ".xml"
 	tableXML := strings.Replace(sheetRelationshipsTableXML, "..", "xl", -1)
 	// Add first table for given sheet.
-	sheetPath, _ := f.sheetMap[trimSheetName(sheet)]
-	sheetRels := "xl/worksheets/_rels/" + strings.TrimPrefix(sheetPath, "xl/worksheets/") + ".rels"
+	sheetRels := "xl/worksheets/_rels/" + strings.TrimPrefix(f.sheetMap[trimSheetName(sheet)], "xl/worksheets/") + ".rels"
 	rID := f.addRels(sheetRels, SourceRelationshipTable, sheetRelationshipsTableXML, "")
 	f.addSheetTable(sheet, rID)
 	err = f.addTable(sheet, tableXML, hcol, hrow, vcol, vrow, tableID, formatSet)
@@ -140,7 +141,7 @@ func (f *File) addTable(sheet, tableXML string, x1, y1, x2, y2, i int, formatSet
 		}
 		name, _ := f.GetCellValue(sheet, cell)
 		if _, err := strconv.Atoi(name); err == nil {
-			f.SetCellStr(sheet, cell, name)
+			_ = f.SetCellStr(sheet, cell, name)
 		}
 		if name == "" {
 			name = "Column" + strconv.Itoa(idx)

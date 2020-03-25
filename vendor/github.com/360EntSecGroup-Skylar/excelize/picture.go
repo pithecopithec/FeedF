@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -14,7 +14,9 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"image"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -46,7 +48,6 @@ func parseFormatPictureSet(formatSet string) (*formatPicture, error) {
 //    package main
 //
 //    import (
-//        "fmt"
 //        _ "image/gif"
 //        _ "image/jpeg"
 //        _ "image/png"
@@ -57,23 +58,19 @@ func parseFormatPictureSet(formatSet string) (*formatPicture, error) {
 //    func main() {
 //        f := excelize.NewFile()
 //        // Insert a picture.
-//        err := f.AddPicture("Sheet1", "A2", "./image1.jpg", "")
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.AddPicture("Sheet1", "A2", "image.jpg", ""); err != nil {
+//            println(err.Error())
 //        }
 //        // Insert a picture scaling in the cell with location hyperlink.
-//        err = f.AddPicture("Sheet1", "D2", "./image1.png", `{"x_scale": 0.5, "y_scale": 0.5, "hyperlink": "#Sheet2!D8", "hyperlink_type": "Location"}`)
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.AddPicture("Sheet1", "D2", "image.png", `{"x_scale": 0.5, "y_scale": 0.5, "hyperlink": "#Sheet2!D8", "hyperlink_type": "Location"}`); err != nil {
+//            println(err.Error())
 //        }
 //        // Insert a picture offset in the cell with external hyperlink, printing and positioning support.
-//        err = f.AddPicture("Sheet1", "H2", "./image3.gif", `{"x_offset": 15, "y_offset": 10, "hyperlink": "https://github.com/360EntSecGroup-Skylar/excelize", "hyperlink_type": "External", "print_obj": true, "lock_aspect_ratio": false, "locked": false, "positioning": "oneCell"}`)
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.AddPicture("Sheet1", "H2", "image.gif", `{"x_offset": 15, "y_offset": 10, "hyperlink": "https://github.com/360EntSecGroup-Skylar/excelize", "hyperlink_type": "External", "print_obj": true, "lock_aspect_ratio": false, "locked": false, "positioning": "oneCell"}`); err != nil {
+//            println(err.Error())
 //        }
-//        err = f.SaveAs("./Book1.xlsx")
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.SaveAs("Book1.xlsx"); err != nil {
+//            println(err.Error())
 //        }
 //    }
 //
@@ -107,7 +104,6 @@ func (f *File) AddPicture(sheet, cell, picture, format string) error {
 //    package main
 //
 //    import (
-//        "fmt"
 //        _ "image/jpeg"
 //        "io/ioutil"
 //
@@ -117,17 +113,15 @@ func (f *File) AddPicture(sheet, cell, picture, format string) error {
 //    func main() {
 //        f := excelize.NewFile()
 //
-//        file, err := ioutil.ReadFile("./image1.jpg")
+//        file, err := ioutil.ReadFile("image.jpg")
 //        if err != nil {
-//            fmt.Println(err)
+//            println(err.Error())
 //        }
-//        err = f.AddPictureFromBytes("Sheet1", "A2", "", "Excel Logo", ".jpg", file)
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.AddPictureFromBytes("Sheet1", "A2", "", "Excel Logo", ".jpg", file); err != nil {
+//            println(err.Error())
 //        }
-//        err = f.SaveAs("./Book1.xlsx")
-//        if err != nil {
-//            fmt.Println(err)
+//        if err := f.SaveAs("Book1.xlsx"); err != nil {
+//            println(err.Error())
 //        }
 //    }
 //
@@ -428,19 +422,18 @@ func (f *File) getSheetRelationshipsTargetByID(sheet, rID string) string {
 // embed in XLSX by given worksheet and cell name. This function returns the
 // file name in XLSX and file contents as []byte data types. For example:
 //
-//    f, err := excelize.OpenFile("./Book1.xlsx")
+//    f, err := excelize.OpenFile("Book1.xlsx")
 //    if err != nil {
-//        fmt.Println(err)
+//        println(err.Error())
 //        return
 //    }
 //    file, raw, err := f.GetPicture("Sheet1", "A2")
 //    if err != nil {
-//        fmt.Println(err)
+//        println(err.Error())
 //        return
 //    }
-//    err = ioutil.WriteFile(file, raw, 0644)
-//    if err != nil {
-//        fmt.Println(err)
+//    if err := ioutil.WriteFile(file, raw, 0644); err != nil {
+//        println(err.Error())
 //    }
 //
 func (f *File) GetPicture(sheet, cell string) (string, []byte, error) {
@@ -469,41 +462,91 @@ func (f *File) GetPicture(sheet, cell string) (string, []byte, error) {
 	return f.getPicture(row, col, drawingXML, drawingRelationships)
 }
 
+// DeletePicture provides a function to delete charts in XLSX by given
+// worksheet and cell name. Note that the image file won't be deleted from the
+// document currently.
+func (f *File) DeletePicture(sheet, cell string) (err error) {
+	col, row, err := CellNameToCoordinates(cell)
+	if err != nil {
+		return
+	}
+	col--
+	row--
+	ws, err := f.workSheetReader(sheet)
+	if err != nil {
+		return
+	}
+	if ws.Drawing == nil {
+		return
+	}
+	drawingXML := strings.Replace(f.getSheetRelationshipsTargetByID(sheet, ws.Drawing.RID), "..", "xl", -1)
+	return f.deleteDrawing(col, row, drawingXML, "Pic")
+}
+
 // getPicture provides a function to get picture base name and raw content
 // embed in XLSX by given coordinates and drawing relationships.
-func (f *File) getPicture(row, col int, drawingXML, drawingRelationships string) (string, []byte, error) {
-	wsDr, _ := f.drawingParser(drawingXML)
-	for _, anchor := range wsDr.TwoCellAnchor {
+func (f *File) getPicture(row, col int, drawingXML, drawingRelationships string) (ret string, buf []byte, err error) {
+	var (
+		wsDr            *xlsxWsDr
+		ok              bool
+		deWsDr          *decodeWsDr
+		drawRel         *xlsxRelationship
+		deTwoCellAnchor *decodeTwoCellAnchor
+	)
+
+	wsDr, _ = f.drawingParser(drawingXML)
+	if ret, buf = f.getPictureFromWsDr(row, col, drawingRelationships, wsDr); len(buf) > 0 {
+		return
+	}
+	deWsDr = new(decodeWsDr)
+	if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(drawingXML)))).
+		Decode(deWsDr); err != nil && err != io.EOF {
+		err = fmt.Errorf("xml decode error: %s", err)
+		return
+	}
+	err = nil
+	for _, anchor := range deWsDr.TwoCellAnchor {
+		deTwoCellAnchor = new(decodeTwoCellAnchor)
+		if err = f.xmlNewDecoder(bytes.NewReader([]byte("<decodeTwoCellAnchor>" + anchor.Content + "</decodeTwoCellAnchor>"))).
+			Decode(deTwoCellAnchor); err != nil && err != io.EOF {
+			err = fmt.Errorf("xml decode error: %s", err)
+			return
+		}
+		if err = nil; deTwoCellAnchor.From != nil && deTwoCellAnchor.Pic != nil {
+			if deTwoCellAnchor.From.Col == col && deTwoCellAnchor.From.Row == row {
+				drawRel = f.getDrawingRelationships(drawingRelationships, deTwoCellAnchor.Pic.BlipFill.Blip.Embed)
+				if _, ok = supportImageTypes[filepath.Ext(drawRel.Target)]; ok {
+					ret, buf = filepath.Base(drawRel.Target), f.XLSX[strings.Replace(drawRel.Target, "..", "xl", -1)]
+					return
+				}
+			}
+		}
+	}
+	return
+}
+
+// getPictureFromWsDr provides a function to get picture base name and raw
+// content in worksheet drawing by given coordinates and drawing
+// relationships.
+func (f *File) getPictureFromWsDr(row, col int, drawingRelationships string, wsDr *xlsxWsDr) (ret string, buf []byte) {
+	var (
+		ok      bool
+		anchor  *xdrCellAnchor
+		drawRel *xlsxRelationship
+	)
+	for _, anchor = range wsDr.TwoCellAnchor {
 		if anchor.From != nil && anchor.Pic != nil {
 			if anchor.From.Col == col && anchor.From.Row == row {
-				xlsxRelationship := f.getDrawingRelationships(drawingRelationships,
+				drawRel = f.getDrawingRelationships(drawingRelationships,
 					anchor.Pic.BlipFill.Blip.Embed)
-				_, ok := supportImageTypes[filepath.Ext(xlsxRelationship.Target)]
-				if ok {
-					return filepath.Base(xlsxRelationship.Target),
-						[]byte(f.XLSX[strings.Replace(xlsxRelationship.Target,
-							"..", "xl", -1)]), nil
+				if _, ok = supportImageTypes[filepath.Ext(drawRel.Target)]; ok {
+					ret, buf = filepath.Base(drawRel.Target), f.XLSX[strings.Replace(drawRel.Target, "..", "xl", -1)]
+					return
 				}
 			}
 		}
 	}
-
-	decodeWsDr := decodeWsDr{}
-	_ = xml.Unmarshal(namespaceStrictToTransitional(f.readXML(drawingXML)), &decodeWsDr)
-	for _, anchor := range decodeWsDr.TwoCellAnchor {
-		decodeTwoCellAnchor := decodeTwoCellAnchor{}
-		_ = xml.Unmarshal([]byte("<decodeTwoCellAnchor>"+anchor.Content+"</decodeTwoCellAnchor>"), &decodeTwoCellAnchor)
-		if decodeTwoCellAnchor.From != nil && decodeTwoCellAnchor.Pic != nil {
-			if decodeTwoCellAnchor.From.Col == col && decodeTwoCellAnchor.From.Row == row {
-				xlsxRelationship := f.getDrawingRelationships(drawingRelationships, decodeTwoCellAnchor.Pic.BlipFill.Blip.Embed)
-				_, ok := supportImageTypes[filepath.Ext(xlsxRelationship.Target)]
-				if ok {
-					return filepath.Base(xlsxRelationship.Target), []byte(f.XLSX[strings.Replace(xlsxRelationship.Target, "..", "xl", -1)]), nil
-				}
-			}
-		}
-	}
-	return "", nil, nil
+	return
 }
 
 // getDrawingRelationships provides a function to get drawing relationships

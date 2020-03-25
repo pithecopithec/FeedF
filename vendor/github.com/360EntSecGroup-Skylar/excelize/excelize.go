@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 
@@ -22,6 +22,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/html/charset"
 )
 
 // File define a populated XLSX file struct.
@@ -43,7 +45,10 @@ type File struct {
 	WorkBook         *xlsxWorkbook
 	Relationships    map[string]*xlsxRelationships
 	XLSX             map[string][]byte
+	CharsetReader    charsetTranscoderFn
 }
+
+type charsetTranscoderFn func(charset string, input io.Reader) (rdr io.Reader, err error)
 
 // OpenFile take the name of an XLSX file and returns a populated XLSX file
 // struct for it.
@@ -59,6 +64,21 @@ func OpenFile(filename string) (*File, error) {
 	}
 	f.Path = filename
 	return f, nil
+}
+
+// newFile is object builder
+func newFile() *File {
+	return &File{
+		checked:          make(map[string]bool),
+		sheetMap:         make(map[string]string),
+		Comments:         make(map[string]*xlsxComments),
+		Drawings:         make(map[string]*xlsxWsDr),
+		Sheet:            make(map[string]*xlsxWorksheet),
+		DecodeVMLDrawing: make(map[string]*decodeVmlDrawing),
+		VMLDrawing:       make(map[string]*vmlDrawing),
+		Relationships:    make(map[string]*xlsxRelationships),
+		CharsetReader:    charset.NewReaderLabel,
+	}
 }
 
 // OpenReader take an io.Reader and return a populated XLSX file.
@@ -88,22 +108,24 @@ func OpenReader(r io.Reader) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &File{
-		checked:          make(map[string]bool),
-		Comments:         make(map[string]*xlsxComments),
-		Drawings:         make(map[string]*xlsxWsDr),
-		Sheet:            make(map[string]*xlsxWorksheet),
-		SheetCount:       sheetCount,
-		DecodeVMLDrawing: make(map[string]*decodeVmlDrawing),
-		VMLDrawing:       make(map[string]*vmlDrawing),
-		Relationships:    make(map[string]*xlsxRelationships),
-		XLSX:             file,
-	}
+	f := newFile()
+	f.SheetCount, f.XLSX = sheetCount, file
 	f.CalcChain = f.calcChainReader()
 	f.sheetMap = f.getSheetMap()
 	f.Styles = f.stylesReader()
 	f.Theme = f.themeReader()
 	return f, nil
+}
+
+// CharsetTranscoder Set user defined codepage transcoder function for open
+// XLSX from non UTF-8 encoding.
+func (f *File) CharsetTranscoder(fn charsetTranscoderFn) *File { f.CharsetReader = fn; return f }
+
+// Creates new XML decoder with charset reader.
+func (f *File) xmlNewDecoder(rdr io.Reader) (ret *xml.Decoder) {
+	ret = xml.NewDecoder(rdr)
+	ret.CharsetReader = f.CharsetReader
+	return
 }
 
 // setDefaultTimeStyle provides a function to set default numbers format for
@@ -116,33 +138,45 @@ func (f *File) setDefaultTimeStyle(sheet, axis string, format int) error {
 	}
 	if s == 0 {
 		style, _ := f.NewStyle(`{"number_format": ` + strconv.Itoa(format) + `}`)
-		f.SetCellStyle(sheet, axis, axis, style)
+		_ = f.SetCellStyle(sheet, axis, axis, style)
 	}
 	return err
 }
 
 // workSheetReader provides a function to get the pointer to the structure
 // after deserialization by given worksheet name.
-func (f *File) workSheetReader(sheet string) (*xlsxWorksheet, error) {
-	name, ok := f.sheetMap[trimSheetName(sheet)]
-	if !ok {
-		return nil, fmt.Errorf("sheet %s is not exist", sheet)
+func (f *File) workSheetReader(sheet string) (xlsx *xlsxWorksheet, err error) {
+	var (
+		name string
+		ok   bool
+	)
+
+	if name, ok = f.sheetMap[trimSheetName(sheet)]; !ok {
+		err = fmt.Errorf("sheet %s is not exist", sheet)
+		return
 	}
-	if f.Sheet[name] == nil {
-		var xlsx xlsxWorksheet
-		_ = xml.Unmarshal(namespaceStrictToTransitional(f.readXML(name)), &xlsx)
+	if xlsx = f.Sheet[name]; f.Sheet[name] == nil {
+		xlsx = new(xlsxWorksheet)
+		if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML(name)))).
+			Decode(xlsx); err != nil && err != io.EOF {
+			err = fmt.Errorf("xml decode error: %s", err)
+			return
+		}
+		err = nil
 		if f.checked == nil {
 			f.checked = make(map[string]bool)
 		}
-		ok := f.checked[name]
-		if !ok {
-			checkSheet(&xlsx)
-			checkRow(&xlsx)
+		if ok = f.checked[name]; !ok {
+			checkSheet(xlsx)
+			if err = checkRow(xlsx); err != nil {
+				return
+			}
 			f.checked[name] = true
 		}
-		f.Sheet[name] = &xlsx
+		f.Sheet[name] = xlsx
 	}
-	return f.Sheet[name], nil
+
+	return
 }
 
 // checkSheet provides a function to fill each row element and make that is
@@ -155,20 +189,12 @@ func checkSheet(xlsx *xlsxWorksheet) {
 			row = lastRow
 		}
 	}
-	sheetData := xlsxSheetData{}
-	existsRows := map[int]int{}
-	for k := range xlsx.SheetData.Row {
-		existsRows[xlsx.SheetData.Row[k].R] = k
+	sheetData := xlsxSheetData{Row: make([]xlsxRow, row)}
+	for _, r := range xlsx.SheetData.Row {
+		sheetData.Row[r.R-1] = r
 	}
-	for i := 0; i < row; i++ {
-		_, ok := existsRows[i+1]
-		if ok {
-			sheetData.Row = append(sheetData.Row, xlsx.SheetData.Row[existsRows[i+1]])
-		} else {
-			sheetData.Row = append(sheetData.Row, xlsxRow{
-				R: i + 1,
-			})
-		}
+	for i := 1; i <= row; i++ {
+		sheetData.Row[i-1].R = i
 	}
 	xlsx.SheetData = sheetData
 }
@@ -177,11 +203,17 @@ func checkSheet(xlsx *xlsxWorksheet) {
 // relationship type, target and target mode.
 func (f *File) addRels(relPath, relType, target, targetMode string) int {
 	rels := f.relsReader(relPath)
-	rID := 0
 	if rels == nil {
 		rels = &xlsxRelationships{}
 	}
-	rID = len(rels.Relationships) + 1
+	var rID int
+	for _, rel := range rels.Relationships {
+		ID, _ := strconv.Atoi(strings.TrimPrefix(rel.ID, "rId"))
+		if ID > rID {
+			rID = ID
+		}
+	}
+	rID++
 	var ID bytes.Buffer
 	ID.WriteString("rId")
 	ID.WriteString(strconv.Itoa(rID))
@@ -200,7 +232,7 @@ func (f *File) addRels(relPath, relType, target, targetMode string) int {
 // Office Excel 2007.
 func replaceWorkSheetsRelationshipsNameSpaceBytes(workbookMarshal []byte) []byte {
 	var oldXmlns = []byte(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
-	var newXmlns = []byte(`<worksheet xr:uid="{00000000-0001-0000-0000-000000000000}" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision" xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3" xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2" xmlns:xr6="http://schemas.microsoft.com/office/spreadsheetml/2016/revision6" xmlns:xr10="http://schemas.microsoft.com/office/spreadsheetml/2016/revision10" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" mc:Ignorable="x14ac xr xr2 xr3 xr6 xr10 x15" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mx="http://schemas.microsoft.com/office/mac/excel/2008/main" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+	var newXmlns = []byte(`<worksheet` + templateNamespaceIDMap)
 	workbookMarshal = bytes.Replace(workbookMarshal, oldXmlns, newXmlns, -1)
 	return workbookMarshal
 }
@@ -210,7 +242,7 @@ func replaceWorkSheetsRelationshipsNameSpaceBytes(workbookMarshal []byte) []byte
 // Excel 2007.
 func replaceStyleRelationshipsNameSpaceBytes(contentMarshal []byte) []byte {
 	var oldXmlns = []byte(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
-	var newXmlns = []byte(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac x16r2 xr xr9" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:x16r2="http://schemas.microsoft.com/office/spreadsheetml/2015/02/main" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision" xmlns:xr9="http://schemas.microsoft.com/office/spreadsheetml/2016/revision9">`)
+	var newXmlns = []byte(`<styleSheet` + templateNamespaceIDMap)
 	contentMarshal = bytes.Replace(contentMarshal, oldXmlns, newXmlns, -1)
 	return contentMarshal
 }
@@ -261,17 +293,14 @@ func (f *File) UpdateLinkedValue() error {
 // AddVBAProject provides the method to add vbaProject.bin file which contains
 // functions and/or macros. The file extension should be .xlsm. For example:
 //
-//    err := f.SetSheetPrOptions("Sheet1", excelize.CodeName("Sheet1"))
-//    if err != nil {
-//        fmt.Println(err)
+//    if err := f.SetSheetPrOptions("Sheet1", excelize.CodeName("Sheet1")); err != nil {
+//        println(err.Error())
 //    }
-//    err = f.AddVBAProject("vbaProject.bin")
-//    if err != nil {
-//        fmt.Println(err)
+//    if err := f.AddVBAProject("vbaProject.bin"); err != nil {
+//        println(err.Error())
 //    }
-//    err = f.SaveAs("macros.xlsm")
-//    if err != nil {
-//        fmt.Println(err)
+//    if err := f.SaveAs("macros.xlsm"); err != nil {
+//        println(err.Error())
 //    }
 //
 func (f *File) AddVBAProject(bin string) error {

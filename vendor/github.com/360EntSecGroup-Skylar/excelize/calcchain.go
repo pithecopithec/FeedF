@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -9,16 +9,26 @@
 
 package excelize
 
-import "encoding/xml"
+import (
+	"bytes"
+	"encoding/xml"
+	"io"
+	"log"
+)
 
 // calcChainReader provides a function to get the pointer to the structure
 // after deserialization of xl/calcChain.xml.
 func (f *File) calcChainReader() *xlsxCalcChain {
+	var err error
+
 	if f.CalcChain == nil {
-		var c xlsxCalcChain
-		_ = xml.Unmarshal(namespaceStrictToTransitional(f.readXML("xl/calcChain.xml")), &c)
-		f.CalcChain = &c
+		f.CalcChain = new(xlsxCalcChain)
+		if err = f.xmlNewDecoder(bytes.NewReader(namespaceStrictToTransitional(f.readXML("xl/calcChain.xml")))).
+			Decode(f.CalcChain); err != nil && err != io.EOF {
+			log.Printf("xml decode error: %s", err)
+		}
 	}
+
 	return f.CalcChain
 }
 
@@ -56,7 +66,7 @@ type xlsxCalcChainCollection []xlsxCalcChainC
 
 // Filter provides a function to filter calculation chain.
 func (c xlsxCalcChainCollection) Filter(fn func(v xlsxCalcChainC) bool) []xlsxCalcChainC {
-	results := make([]xlsxCalcChainC, 0)
+	var results []xlsxCalcChainC
 	for _, v := range c {
 		if fn(v) {
 			results = append(results, v)

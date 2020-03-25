@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -125,7 +125,7 @@ type xlsxPivotField struct {
 	UniqueMemberProperty         string             `xml:"uniqueMemberProperty,attr,omitempty"`
 	Compact                      bool               `xml:"compact,attr"`
 	AllDrilled                   bool               `xml:"allDrilled,attr,omitempty"`
-	NumFmtId                     string             `xml:"numFmtId,attr,omitempty"`
+	NumFmtID                     string             `xml:"numFmtId,attr,omitempty"`
 	Outline                      bool               `xml:"outline,attr"`
 	SubtotalTop                  bool               `xml:"subtotalTop,attr,omitempty"`
 	DragToRow                    bool               `xml:"dragToRow,attr,omitempty"`
@@ -187,7 +187,7 @@ type xlsxItem struct {
 	F  bool   `xml:"f,attr,omitempty"`
 	M  bool   `xml:"m,attr,omitempty"`
 	C  bool   `xml:"c,attr,omitempty"`
-	X  int    `xml:"x,attr,omitempty,omitempty"`
+	X  int    `xml:"x,attr,omitempty"`
 	D  bool   `xml:"d,attr,omitempty"`
 	E  bool   `xml:"e,attr,omitempty"`
 }
@@ -273,7 +273,7 @@ type xlsxDataField struct {
 	ShowDataAs string      `xml:"showDataAs,attr,omitempty"`
 	BaseField  int         `xml:"baseField,attr,omitempty"`
 	BaseItem   int64       `xml:"baseItem,attr,omitempty"`
-	NumFmtId   string      `xml:"numFmtId,attr,omitempty"`
+	NumFmtID   string      `xml:"numFmtId,attr,omitempty"`
 	ExtLst     *xlsxExtLst `xml:"extLst"`
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -13,6 +13,8 @@ import (
 	"errors"
 	"math"
 	"strings"
+
+	"github.com/mohae/deepcopy"
 )
 
 // Define the default cell size and EMU unit of measurement.
@@ -26,7 +28,7 @@ const (
 // worksheet name and column name. For example, get visible state of column D
 // in Sheet1:
 //
-//    visiable, err := f.GetColVisible("Sheet1", "D")
+//    visible, err := f.GetColVisible("Sheet1", "D")
 //
 func (f *File) GetColVisible(sheet, col string) (bool, error) {
 	visible := true
@@ -52,43 +54,64 @@ func (f *File) GetColVisible(sheet, col string) (bool, error) {
 	return visible, err
 }
 
-// SetColVisible provides a function to set visible of a single column by given
-// worksheet name and column name. For example, hide column D in Sheet1:
+// SetColVisible provides a function to set visible columns by given worksheet
+// name, columns range and visibility.
+//
+// For example hide column D on Sheet1:
 //
 //    err := f.SetColVisible("Sheet1", "D", false)
 //
-func (f *File) SetColVisible(sheet, col string, visible bool) error {
-	colNum, err := ColumnNameToNumber(col)
+// Hide the columns from D to F (included):
+//
+//    err := f.SetColVisible("Sheet1", "D:F", false)
+//
+func (f *File) SetColVisible(sheet, columns string, visible bool) error {
+	var max int
+
+	colsTab := strings.Split(columns, ":")
+	min, err := ColumnNameToNumber(colsTab[0])
 	if err != nil {
 		return err
 	}
-	colData := xlsxCol{
-		Min:         colNum,
-		Max:         colNum,
-		Hidden:      !visible,
-		CustomWidth: true,
+	if len(colsTab) == 2 {
+		max, err = ColumnNameToNumber(colsTab[1])
+		if err != nil {
+			return err
+		}
+	} else {
+		max = min
+	}
+	if max < min {
+		min, max = max, min
 	}
 	xlsx, err := f.workSheetReader(sheet)
 	if err != nil {
 		return err
 	}
+	colData := xlsxCol{
+		Min:         min,
+		Max:         max,
+		Width:       9, // default width
+		Hidden:      !visible,
+		CustomWidth: true,
+	}
 	if xlsx.Cols == nil {
 		cols := xlsxCols{}
 		cols.Col = append(cols.Col, colData)
 		xlsx.Cols = &cols
-		return err
+		return nil
 	}
-	for v := range xlsx.Cols.Col {
-		if xlsx.Cols.Col[v].Min <= colNum && colNum <= xlsx.Cols.Col[v].Max {
-			colData = xlsx.Cols.Col[v]
-		}
-	}
-	colData.Min = colNum
-	colData.Max = colNum
-	colData.Hidden = !visible
-	colData.CustomWidth = true
-	xlsx.Cols.Col = append(xlsx.Cols.Col, colData)
-	return err
+	xlsx.Cols.Col = flatCols(colData, xlsx.Cols.Col, func(fc, c xlsxCol) xlsxCol {
+		fc.BestFit = c.BestFit
+		fc.Collapsed = c.Collapsed
+		fc.CustomWidth = c.CustomWidth
+		fc.OutlineLevel = c.OutlineLevel
+		fc.Phonetic = c.Phonetic
+		fc.Style = c.Style
+		fc.Width = c.Width
+		return fc
+	})
+	return nil
 }
 
 // GetColOutlineLevel provides a function to get outline level of a single
@@ -149,16 +172,16 @@ func (f *File) SetColOutlineLevel(sheet, col string, level uint8) error {
 		xlsx.Cols = &cols
 		return err
 	}
-	for v := range xlsx.Cols.Col {
-		if xlsx.Cols.Col[v].Min <= colNum && colNum <= xlsx.Cols.Col[v].Max {
-			colData = xlsx.Cols.Col[v]
-		}
-	}
-	colData.Min = colNum
-	colData.Max = colNum
-	colData.OutlineLevel = level
-	colData.CustomWidth = true
-	xlsx.Cols.Col = append(xlsx.Cols.Col, colData)
+	xlsx.Cols.Col = flatCols(colData, xlsx.Cols.Col, func(fc, c xlsxCol) xlsxCol {
+		fc.BestFit = c.BestFit
+		fc.Collapsed = c.Collapsed
+		fc.CustomWidth = c.CustomWidth
+		fc.Hidden = c.Hidden
+		fc.Phonetic = c.Phonetic
+		fc.Style = c.Style
+		fc.Width = c.Width
+		return fc
+	})
 	return err
 }
 
@@ -201,21 +224,21 @@ func (f *File) SetColStyle(sheet, columns string, styleID int) error {
 	if xlsx.Cols == nil {
 		xlsx.Cols = &xlsxCols{}
 	}
-	var find bool
-	for idx, col := range xlsx.Cols.Col {
-		if col.Min == min && col.Max == max {
-			xlsx.Cols.Col[idx].Style = styleID
-			find = true
-		}
-	}
-	if !find {
-		xlsx.Cols.Col = append(xlsx.Cols.Col, xlsxCol{
-			Min:   min,
-			Max:   max,
-			Width: 9,
-			Style: styleID,
-		})
-	}
+	xlsx.Cols.Col = flatCols(xlsxCol{
+		Min:   min,
+		Max:   max,
+		Width: 9,
+		Style: styleID,
+	}, xlsx.Cols.Col, func(fc, c xlsxCol) xlsxCol {
+		fc.BestFit = c.BestFit
+		fc.Collapsed = c.Collapsed
+		fc.CustomWidth = c.CustomWidth
+		fc.Hidden = c.Hidden
+		fc.OutlineLevel = c.OutlineLevel
+		fc.Phonetic = c.Phonetic
+		fc.Width = c.Width
+		return fc
+	})
 	return nil
 }
 
@@ -248,14 +271,53 @@ func (f *File) SetColWidth(sheet, startcol, endcol string, width float64) error 
 		Width:       width,
 		CustomWidth: true,
 	}
-	if xlsx.Cols != nil {
-		xlsx.Cols.Col = append(xlsx.Cols.Col, col)
-	} else {
+	if xlsx.Cols == nil {
 		cols := xlsxCols{}
 		cols.Col = append(cols.Col, col)
 		xlsx.Cols = &cols
+		return err
 	}
+	xlsx.Cols.Col = flatCols(col, xlsx.Cols.Col, func(fc, c xlsxCol) xlsxCol {
+		fc.BestFit = c.BestFit
+		fc.Collapsed = c.Collapsed
+		fc.Hidden = c.Hidden
+		fc.OutlineLevel = c.OutlineLevel
+		fc.Phonetic = c.Phonetic
+		fc.Style = c.Style
+		return fc
+	})
 	return err
+}
+
+// flatCols provides a method for the column's operation functions to flatten
+// and check the worksheet columns.
+func flatCols(col xlsxCol, cols []xlsxCol, replacer func(fc, c xlsxCol) xlsxCol) []xlsxCol {
+	fc := []xlsxCol{}
+	for i := col.Min; i <= col.Max; i++ {
+		c := deepcopy.Copy(col).(xlsxCol)
+		c.Min, c.Max = i, i
+		fc = append(fc, c)
+	}
+	inFlat := func(colID int, cols []xlsxCol) (int, bool) {
+		for idx, c := range cols {
+			if c.Max == colID && c.Min == colID {
+				return idx, true
+			}
+		}
+		return -1, false
+	}
+	for _, column := range cols {
+		for i := column.Min; i <= column.Max; i++ {
+			if idx, ok := inFlat(i, fc); ok {
+				fc[idx] = replacer(fc[idx], column)
+				continue
+			}
+			c := deepcopy.Copy(column).(xlsxCol)
+			c.Min, c.Max = i, i
+			fc = append(fc, c)
+		}
+	}
+	return fc
 }
 
 // positionObjectPixels calculate the vertices that define the position of a

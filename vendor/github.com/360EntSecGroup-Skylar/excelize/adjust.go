@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -53,7 +53,7 @@ func (f *File) adjustHelper(sheet string, dir adjustDirection, num, offset int) 
 		return err
 	}
 	checkSheet(xlsx)
-	checkRow(xlsx)
+	_ = checkRow(xlsx)
 
 	if xlsx.MergeCells != nil && len(xlsx.MergeCells.Cells) == 0 {
 		xlsx.MergeCells = nil
@@ -196,20 +196,36 @@ func (f *File) adjustAutoFilterHelper(dir adjustDirection, coordinates []int, nu
 // areaRefToCoordinates provides a function to convert area reference to a
 // pair of coordinates.
 func (f *File) areaRefToCoordinates(ref string) ([]int, error) {
-	coordinates := make([]int, 4)
 	rng := strings.Split(ref, ":")
-	firstCell := rng[0]
-	lastCell := rng[1]
+	return areaRangeToCoordinates(rng[0], rng[1])
+}
+
+// areaRangeToCoordinates provides a function to convert cell range to a
+// pair of coordinates.
+func areaRangeToCoordinates(firstCell, lastCell string) ([]int, error) {
+	coordinates := make([]int, 4)
 	var err error
 	coordinates[0], coordinates[1], err = CellNameToCoordinates(firstCell)
 	if err != nil {
 		return coordinates, err
 	}
 	coordinates[2], coordinates[3], err = CellNameToCoordinates(lastCell)
-	if err != nil {
-		return coordinates, err
-	}
 	return coordinates, err
+}
+
+// sortCoordinates provides a function to correct the coordinate area, such
+// correct C1:B3 to B1:C3.
+func sortCoordinates(coordinates []int) error {
+	if len(coordinates) != 4 {
+		return errors.New("coordinates length must be 4")
+	}
+	if coordinates[2] < coordinates[0] {
+		coordinates[2], coordinates[0] = coordinates[0], coordinates[2]
+	}
+	if coordinates[3] < coordinates[1] {
+		coordinates[3], coordinates[1] = coordinates[1], coordinates[3]
+	}
+	return nil
 }
 
 // coordinatesToAreaRef provides a function to convert a pair of coordinates

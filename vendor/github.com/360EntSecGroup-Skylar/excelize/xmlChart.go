@@ -1,4 +1,4 @@
-// Copyright 2016 - 2019 The excelize Authors. All rights reserved. Use of
+// Copyright 2016 - 2020 The excelize Authors. All rights reserved. Use of
 // this source code is governed by a BSD-style license that can be found in
 // the LICENSE file.
 //
@@ -56,11 +56,11 @@ type cChart struct {
 // cTitle (Title) directly maps the title element. This element specifies a
 // title.
 type cTitle struct {
-	Tx      cTx         `xml:"tx,omitempty"`
-	Layout  string      `xml:"layout,omitempty"`
-	Overlay attrValBool `xml:"overlay,omitempty"`
-	SpPr    cSpPr       `xml:"spPr,omitempty"`
-	TxPr    cTxPr       `xml:"txPr,omitempty"`
+	Tx      cTx          `xml:"tx,omitempty"`
+	Layout  string       `xml:"layout,omitempty"`
+	Overlay *attrValBool `xml:"overlay"`
+	SpPr    cSpPr        `xml:"spPr,omitempty"`
+	TxPr    cTxPr        `xml:"txPr,omitempty"`
 }
 
 // cTx (Chart Text) directly maps the tx element. This element specifies text
@@ -141,25 +141,25 @@ type aSchemeClr struct {
 // attrValInt directly maps the val element with integer data type as an
 // attribute。
 type attrValInt struct {
-	Val int `xml:"val,attr"`
+	Val *int `xml:"val,attr"`
 }
 
 // attrValFloat directly maps the val element with float64 data type as an
 // attribute。
 type attrValFloat struct {
-	Val float64 `xml:"val,attr"`
+	Val *float64 `xml:"val,attr"`
 }
 
 // attrValBool directly maps the val element with boolean data type as an
 // attribute。
 type attrValBool struct {
-	Val bool `xml:"val,attr"`
+	Val *bool `xml:"val,attr"`
 }
 
 // attrValString directly maps the val element with string data type as an
 // attribute。
 type attrValString struct {
-	Val string `xml:"val,attr"`
+	Val *string `xml:"val,attr"`
 }
 
 // aCs directly maps the a:cs element.
@@ -312,6 +312,7 @@ type cPlotArea struct {
 	LineChart      *cCharts `xml:"lineChart"`
 	PieChart       *cCharts `xml:"pieChart"`
 	Pie3DChart     *cCharts `xml:"pie3DChart"`
+	OfPieChart     *cCharts `xml:"ofPieChart"`
 	RadarChart     *cCharts `xml:"radarChart"`
 	ScatterChart   *cCharts `xml:"scatterChart"`
 	Surface3DChart *cCharts `xml:"surface3DChart"`
@@ -329,9 +330,11 @@ type cCharts struct {
 	Grouping     *attrValString `xml:"grouping"`
 	RadarStyle   *attrValString `xml:"radarStyle"`
 	ScatterStyle *attrValString `xml:"scatterStyle"`
+	OfPieType    *attrValString `xml:"ofPieType"`
 	VaryColors   *attrValBool   `xml:"varyColors"`
 	Wireframe    *attrValBool   `xml:"wireframe"`
 	Ser          *[]cSer        `xml:"ser"`
+	SerLines     *attrValString `xml:"serLines"`
 	DLbls        *cDLbls        `xml:"dLbls"`
 	Shape        *attrValString `xml:"shape"`
 	HoleSize     *attrValInt    `xml:"holeSize"`
@@ -347,6 +350,7 @@ type cAxs struct {
 	Delete         *attrValBool   `xml:"delete"`
 	AxPos          *attrValString `xml:"axPos"`
 	MajorGridlines *cChartLines   `xml:"majorGridlines"`
+	MinorGridlines *cChartLines   `xml:"minorGridlines"`
 	NumFmt         *cNumFmt       `xml:"numFmt"`
 	MajorTickMark  *attrValString `xml:"majorTickMark"`
 	MinorTickMark  *attrValString `xml:"minorTickMark"`
@@ -356,9 +360,13 @@ type cAxs struct {
 	CrossAx        *attrValInt    `xml:"crossAx"`
 	Crosses        *attrValString `xml:"crosses"`
 	CrossBetween   *attrValString `xml:"crossBetween"`
+	MajorUnit      *attrValFloat  `xml:"majorUnit"`
+	MinorUnit      *attrValFloat  `xml:"minorUnit"`
 	Auto           *attrValBool   `xml:"auto"`
 	LblAlgn        *attrValString `xml:"lblAlgn"`
 	LblOffset      *attrValInt    `xml:"lblOffset"`
+	TickLblSkip    *attrValInt    `xml:"tickLblSkip"`
+	TickMarkSkip   *attrValInt    `xml:"tickMarkSkip"`
 	NoMultiLvlLbl  *attrValBool   `xml:"noMultiLvlLbl"`
 }
 
@@ -514,11 +522,13 @@ type cPageMargins struct {
 type formatChartAxis struct {
 	Crossing            string  `json:"crossing"`
 	MajorGridlines      bool    `json:"major_grid_lines"`
+	MinorGridlines      bool    `json:"minor_grid_lines"`
 	MajorTickMark       string  `json:"major_tick_mark"`
 	MinorTickMark       string  `json:"minor_tick_mark"`
 	MinorUnitType       string  `json:"minor_unit_type"`
-	MajorUnit           int     `json:"major_unit"`
+	MajorUnit           float64 `json:"major_unit"`
 	MajorUnitType       string  `json:"major_unit_type"`
+	TickLabelSkip       int     `json:"tick_label_skip"`
 	DisplayUnits        string  `json:"display_units"`
 	DisplayUnitsVisible bool    `json:"display_units_visible"`
 	DateAxis            bool    `json:"date_axis"`
@@ -587,6 +597,7 @@ type formatChart struct {
 	ShowHiddenData bool   `json:"show_hidden_data"`
 	SetRotation    int    `json:"set_rotation"`
 	SetHoleSize    int    `json:"set_hole_size"`
+	order          int
 }
 
 // formatChartLegend directly maps the format settings of the chart legend.
@@ -606,8 +617,9 @@ type formatChartSeries struct {
 	Categories string `json:"categories"`
 	Values     string `json:"values"`
 	Line       struct {
-		None  bool   `json:"none"`
-		Color string `json:"color"`
+		None  bool    `json:"none"`
+		Color string  `json:"color"`
+		Width float64 `json:"width"`
 	} `json:"line"`
 	Marker struct {
 		Type   string  `json:"type"`

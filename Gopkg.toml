@@ -27,7 +27,15 @@
 
 [[constraint]]
   name = "github.com/360EntSecGroup-Skylar/excelize"
-  version = "2.0.2"
+  version = "2.1.0"
+
+[[constraint]]
+  name = "github.com/akavel/rsrc"
+  version = "0.8.0"
+
+[[constraint]]
+  name = "golang.org/x/text"
+  version = "0.3.2"
 
 [prune]
   go-tests = true
