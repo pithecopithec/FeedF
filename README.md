@@ -13,6 +13,7 @@ Attributes, values, and units from the <b>param</b> tag fall on a separate sheet
 4) <b>Click Enter</b>.
 5) <b>Enjoy!</b> An xlsx file with the same name as xml appeared in the folder.
 
+________________________________________________________________________________________________________________________________________
 
 Из формата YML (Yandex Market Language) разор в нужный мне формат.
 Извлекает нужные поля из тега <b>Offer</b>.
